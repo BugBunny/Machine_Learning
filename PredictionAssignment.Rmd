@@ -1,0 +1,286 @@
+---
+title: "Report on the Practical Machine Learning Assignment"
+author: "Ian T."
+date: "Friday, 14th August, 2015"
+output:
+  html_document:
+    pandoc_args: [
+      "+RTS", "-K64m",
+      "-RTS"
+    ]
+---
+
+## Introduction
+
+This report documents an analysis conducted for the Coursera Practical Machine Learning course assignment.
+
+The aim of the analysis was to develop an algorithm to classify dumb bell lifts into 5 groups. The first category (A) comprises correct lifts and the other 4 categories (B--E) comprise lifts done with 4 distinct common errors.
+
+The analysis uses measurements from accelerometers on the belt, forearm, arm, and dumb bell of 6 participants. Each participant was asked to do 10 lifts of each type, generating 19,642 sets of measurements in total. There are 13 individual measures available from each of the 4 sensors in each set of measurements and so 52 predictor variables in each observation.
+
+Vellosso et al. (2013) describe the study and further information on it is available here  http://groupware.les.inf.puc-rio.br/har (see the section on the _Weight Lifting Exercise Dataset_)
+
+## Preprocessing of the data
+
+The data comprise two files: a large training dataset and 20 observations for which the classification variable has been held back that are used to assess the final classificatory model. Both files were downloaded and read into R.
+
+The training data for this project are available here: 
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv
+
+The test data are available here: 
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv
+```{r message=FALSE}
+# Housekeeping
+setwd("D:/Ian/git/datasciencecoursera/MachineLearning")
+library(caret); library(ggplot2);
+library(reshape2); library(randomForest)
+
+# One-time download of files and import them into R
+if (!file.exists("pml_training.RDS")) {
+    myURL <- "https://d396qusza40orc.cloudfront.net/predmachlearn/"
+    dname <- "pml_testing.csv"   
+    download.file(paste0(myURL, "pml-testing.csv"), dname)
+    pml_testing <- read.csv(dname)
+    saveRDS(pml_testing, file = "pml_testing.RDS")
+    dname <- "pml_training.csv"
+    download.file(paste0(myURL, "pml-training.csv"), dname)
+    pml_training <- read.csv(dname)
+    saveRDS(pml_training, file = "pml_training.RDS")
+}
+```
+The original data include a number of identifiers that are of no use for making predictions for other individuals and numerous summary variables describing each lift as a whole. As this analysis was conducted at the level of the 19,622 individual sets of measurements, the identifiers and summary variables were all discarded.
+
+In order to assess the out-of-sample accuracy of the algorithms, the large training dataset was randomly split 70/30, stratifying on the outcome classification. The two resulting datasets were used as training and test datasets respectively for the purposes of this analysis.
+
+There were no missing values in the sensor data and no variables with near zero variance. However, 6 extreme outlying measurements had been recorded in one of the observations. Replacement values for these measurements were imputed using the k nearest neighbours algorithm.
+
+All the sensor measurements were centred and standardized.
+```{r}
+# One-time set up of my training and test files and 20 assessment cases
+if (!file.exists("pml_mytrain.RDS")) {
+    if (!exists("pml_training")) pml_training <-
+            readRDS("pml_training.RDS")
+    # Drop everything except raw measures and classe outcome
+    work0 <- pml_training[, c(8:11, 37:49, 60:68, 84:86, 102, 
+                               113:124, 140, 151:160)]
+    print(dim(pml_training)); print(dim(work0))
+    remove(pml_training)
+    # Check whether there are any missing values left
+    print(sum(apply(work0, 2, function(x) sum(is.na(x)))))
+    
+    # Set aside 30% of measures for validation
+    set.seed(37374)
+    inTrain <- createDataPartition(work0$classe, p = 0.7, list = FALSE)
+    work1 <- work0[inTrain,]
+    
+    # Preprocessing: standardize all the predictors
+    preObj1 <- preProcess(work1[, -53], method = c("center", "scale"))
+    work2 <- predict(preObj1, work1[ , -53])
+    
+    # Preprocessing: set extreme outliers to missing and impute them
+    work2 <- apply(work2, 2, function(x) {x[x > 12] <- NA; x})
+    work2 <- apply(work2, 2, function(x) {x[x < -12] <- NA; x})
+    preObj2 <- preProcess(work2, method="knnImpute")
+    work3 <- predict(preObj2, work2)
+    work2[which(is.na(work2))] <- work3[which(is.na(work2))]
+    pml_mytrain <- data.frame(work2, work1$classe)
+    colnames(pml_mytrain)[53] <- "classe"
+    saveRDS(pml_mytrain, file = "pml_mytrain.RDS")   
+
+    # Repeat preprocessing on the test data 
+    work1 <- work0[-inTrain,]   
+    work2 <- predict(preObj1, work1[ , -53])
+    work2 <- apply(work2, 2, function(x) {x[x > 12] <- NA; x})
+    work2 <- apply(work2, 2, function(x) {x[x < -12] <- NA; x})
+    work3 <- predict(preObj2, work2)
+    work2[which(is.na(work2))] <- work3[which(is.na(work2))]
+    pml_mytest <- data.frame(work2, work1$classe)
+    colnames(pml_mytest)[53] <- "classe"
+    saveRDS(pml_mytest, file = "pml_mytest.RDS")
+    
+    # And now on the 20 cases for the assessment
+    if (!exists("pml_testing")) pml_testing <- readRDS("pml_testing.RDS")
+    work1 <- pml_testing[, c(8:11, 37:49, 60:68, 84:86, 102, 
+                           113:124, 140, 151:160)]
+    work2 <- predict(preObj1, work1[ , -53])
+    work2 <- apply(work2, 2, function(x) {x[x > 12] <- NA; x})
+    work2 <- apply(work2, 2, function(x) {x[x < -12] <- NA; x})
+    work3 <- predict(preObj2, work2)
+    work2[which(is.na(work2))] <- work3[which(is.na(work2))]
+    pml_final <- data.frame(work2)
+    saveRDS(pml_final, file = "pml_final.RDS")
+    
+    print(dim(pml_mytrain)); print(dim(pml_mytest)); print(dim(pml_final))
+
+    # Tidy up environment
+    remove(work0, work1, work2, work3, inTrain)
+} else {
+    pml_mytrain <- readRDS("pml_mytrain.RDS")
+}
+```
+
+# Exploratory data analysis
+
+Figure 1 shows the distributions of the 52 sensor measurements. There seems no strong case for transforming either the whole lot or a subset of them to reduce their skew.
+
+Figure 2 looks at the relationship between the measures and the 5 different classes of dumb bell lifts. None of the measures individually are strong predictors of class of dumb bell lift.
+```{r fig.height=20, message=FALSE}
+# Examine variable distributions and association with classe
+ggplot(melt(pml_mytrain[, -53])) + aes(x = value) + 
+    facet_wrap(~variable, ncol = 4) + geom_histogram() +
+    ggtitle("Figure 1. Distributions of the sensor measurements")
+featurePlot(x = pml_mytrain[, -53], y = pml_mytrain$classe,
+    plot = "box", layout = (c(4,13)),
+    main = ("Figure 2: Standardized measures for the 5 classes of dumb bell lift"))
+```
+
+## Tuning of candidate algorithms
+
+Before deciding what algorithm to adopt, I assessed the performance of the following five models:
+
+ * a linear discriminant analysis (method: _lda_) 
+ * a naive Bayes model (method: _nb_) 
+ * a straightforward decision tree (method: _rpart_)
+ * a boosted decision tree (method: _gbm_)
+ * a random forest (method: _rf_).
+
+The discriminant analysis, naive Bayes model and two decision trees were all tuned using cross-validation with 3 repeats of 10 folds (e.g. Figure 4). The random forest was tuned using its internal estimates of OOB accuracy.
+```{r fig.width=9, message=FALSE}
+# Fit classification tree
+if (!file.exists("treeFit.RDS")) {
+    set.seed(8569)
+    tc <- trainControl(method = "repeatedcv", repeats = 3)
+    treeFit <- train(classe ~ ., method = "rpart", data = pml_mytrain,
+                     tuneLength = 10, trControl = tc)
+    saveRDS(treeFit, file = "treeFit.RDS")
+} else {
+    treeFit <- readRDS("treeFit.RDS")
+}
+t_classes <- predict(treeFit)
+treeFit$results
+library(rattle); library(rpart.plot)
+fancyRpartPlot(treeFit$finalModel,
+           main = "Figure 3: rpart decision tree for the lift data")
+
+# Fit linear discriminant analysis
+if (!file.exists("ldaFit.RDS")) {
+    set.seed(8569)
+    tc <- trainControl(method = "repeatedcv", repeats = 3)
+    ldaFit <- train(classe ~ ., method = "lda", data = pml_mytrain,
+                    trControl = tc)
+    saveRDS(ldaFit, file = "ldaFit.RDS")
+} else {
+    ldaFit <- readRDS("ldaFit.RDS")
+}
+l_classes <- predict(ldaFit)
+
+# Fit gradient boosted tree
+if (!file.exists("booFit.RDS")) {
+    set.seed(8569)
+    tc <- trainControl(method = "repeatedcv", repeats = 3)
+    gbmGrid <-  expand.grid(interaction.depth = c(3, 7, 12),
+                            n.trees = c(150, 250, 400),
+                            shrinkage = 0.1, n.minobsinnode = 5)
+    booFit <- train(classe ~ ., method="gbm", data=pml_mytrain, 
+               tuneGrid = gbmGrid, trControl = tc, verbose = TRUE)
+    saveRDS(booFit, file = "booFit.RDS")
+} else {
+    booFit <- readRDS("booFit.RDS")
+}     
+b_classes <- predict(booFit)
+booFit$finalModel
+ggplot(booFit) +
+       ggtitle("Figure 4: Tuning of the gradient boosted tree")
+booFit$results[, c(2,4:8)]
+
+# Fit random forest (use interal estimates of OOB accuracy rather
+# than cross-validation as life is short and computers slow)
+if (!file.exists("forestFit.RDS")) {
+    rfGrid <- expand.grid(mtry= c(2, 7, 26))
+    forestFit <- train(classe ~ ., method = "rf", data = pml_mytrain,
+                       prox = TRUE, tuneGrid = rfGrid)
+    saveRDS(forestFit, file = "forestFit.RDS")
+} else {
+    forestFit <- readRDS("forestFit.RDS")
+}
+f_classes <- predict(forestFit)
+forestFit$results
+
+# Fit naive Bayes 
+if (!file.exists("nbFit.RDS")) {
+    set.seed(8569)
+    tc <- trainControl(method = "repeatedcv", repeats = 3)
+    nbFit <- train(classe ~ ., method="nb", data=pml_mytrain,
+                   trControl = tc)
+    saveRDS(nbFit, file = "nbFit.RDS")
+    nb_classes <- predict(nbFit)
+    saveRDS(nb_classes, file = "nb_classes.RDS")
+} else {
+    nbFit <- readRDS("nbFit.RDS")
+    nb_classes <- readRDS("nb_classes.RDS")
+}
+nbFit$results
+```
+
+## Accuracy of the five models
+
+The estimates of the OOB accuracy of the 4 models that were fitted to the same cross-validation samples can be compared directly, but the OOB accuracy of the random forest was estimated using the unselected observations in each bootstrap sample.
+
+The gradient boosted tree and random forest produced much more accurate predictions than the other algorithms. The GBM was significantly more accurate than the other 3 cross-validated models; the Naive Bayes model was significantly more accurate than the other two. The two highly accurate models both produced correct predictions for the entire training set with a predicted OOB accuracy of 99.5%.
+
+Large numbers of the variables contributed materially to the classification process in both the highly accurate models (Figure 5). This finding tend to justify the decision not to use principal components analysis or a singular value decomposition to reduce the 52 variables to a more limited number of features.
+```{r fig.height=8, message=FALSE}
+# Compare accuracy of the 4 models that were cross-validated
+simples <- resamples(list(LDA=ldaFit, Naive_Bayes=nbFit, CART=treeFit,
+              Gradient_Boost=booFit))
+summary(simples)
+summary(diff(simples))
+# Now the performance statistics for the random forest.
+forestFit$results[2, ]
+forestFit$finalModel
+# Confusion matrices for the training data
+confusionMatrix(b_classes, pml_mytrain$classe)
+confusionMatrix(f_classes, pml_mytrain$classe)
+# Variable importance plot for the random forest
+varImpPlot(forestFit$finalModel,
+    main = "Figure 5: Important measurements in the random forest")
+```
+
+## Estimated out-of-bag errors based on the test data
+
+To check the out-of-bag accuracy of the predictions produced by the two most promising models, each was applied to the test data. Both models performed very slightly worse on this particular sample of test data than had been predicted using the training data. The gradient boosted model was slightly more accurate than the random forest (99.35% versus 99.27%), getting 5 more of the 5885 predictions in the test data correct.
+```{r message=FALSE}
+# Boosted tree
+pml_mytest <-readRDS("pml_mytest.RDS")
+btest_classes <- predict(booFit, pml_mytest)
+confusionMatrix(btest_classes, pml_mytest$classe)
+
+# Random forest
+ftest_classes <- predict(forestFit, pml_mytest)
+confusionMatrix(ftest_classes,pml_mytest$classe)
+
+# Cross-check the GBM against the random forest
+boost_OK <- btest_classes==pml_mytest$classe
+forest_OK <- ftest_classes==pml_mytest$classe
+table(boost_OK,forest_OK)
+```
+
+## Predictions for the 20 unclassified cases
+
+Finally, the two highly accurate models were used to classify the 20 measurements for which the category of the dumb bell lift had been held back. The two models made identical predictions.
+```{r message=FALSE}
+if (!exists("pml_final")) pml_final <- readRDS("pml_final.RDS")
+fftest_classes <- predict(forestFit, pml_final)
+bftest_classes <- predict(booFit, pml_final)
+identical(bftest_classes, fftest_classes)
+```
+
+## References
+
+Velloso, E.; Bulling, A.; Gellersen, H.; Ugulino, W.; Fuks, H. [Qualitative Activity Recognition of Weight Lifting Exercises](http://groupware.les.inf.puc-rio.br/public/papers/2013.Velloso.QAR-WLE.pdf). Proceedings of 4th International Augmented Human Conference, Stuttgart, Germany. ACM SIGCHI, 2013.
+
+### Software environment
+
+```{r}
+Sys.info()[1:2]; Sys.info()[3]; R.version.string
+```
