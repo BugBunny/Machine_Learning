@@ -10,6 +10,8 @@ The aim of the analysis was to develop an algorithm to classify dumb bell lifts 
 The training data for this project are available here: https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv
 and the test data here: https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv
 
+My report is available here: http://bugbunny.github.io/Machine_Learning/PredictionAssignment.html
+
 Further information is provided at http://groupware.les.inf.puc-rio.br/har 
 
 The script was written using R 3.2.1 under Windows 7 SP1.
